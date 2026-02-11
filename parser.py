@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -51,6 +51,39 @@ def _snippet(text: str, start: int, end: int, window: int = 50) -> str:
     return text[left:right].strip()
 
 
+def _request_headers() -> dict[str, str]:
+    """Build browser-like headers to reduce 403 blocks on strict websites."""
+
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ru,en-US;q=0.9,en;q=0.8",
+    }
+
+
+def _fallback_url(url: str) -> str | None:
+    """Return alternative URL for websites that frequently block bot-like requests.
+
+    For Reddit, we can often read content via old.reddit.com when www.reddit.com
+    returns HTTP 403.
+    """
+
+    parsed = urlparse(url)
+    if parsed.netloc.lower() != "www.reddit.com":
+        return None
+
+    return urlunparse(parsed._replace(netloc="old.reddit.com"))
+
+
+async def _download_once(session: aiohttp.ClientSession, url: str) -> str:
+    async with session.get(url, allow_redirects=True, headers=_request_headers()) as response:
+        response.raise_for_status()
+        return await response.text(errors="ignore")
+
+
 async def fetch_html(url: str, timeout_sec: int = 15) -> str:
     """Download HTML asynchronously with robust network error handling."""
 
@@ -59,9 +92,14 @@ async def fetch_html(url: str, timeout_sec: int = 15) -> str:
 
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url, allow_redirects=True) as response:
-                response.raise_for_status()
-                return await response.text(errors="ignore")
+            try:
+                return await _download_once(session, url)
+            except aiohttp.ClientResponseError as exc:
+                # Retry known strict websites through alternate route.
+                alt_url = _fallback_url(url)
+                if exc.status == 403 and alt_url:
+                    return await _download_once(session, alt_url)
+                raise
     except aiohttp.InvalidURL as exc:
         raise ParseError("URL содержит ошибку.") from exc
     except aiohttp.ClientResponseError as exc:
