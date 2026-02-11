@@ -43,12 +43,63 @@ def get_bot_token() -> str:
     )
 
 
-def render_table(df) -> str:
-    """Render dataframe as plain-text table suitable for Telegram messages."""
+def render_table(df, max_rows: int = 15) -> str:
+    """Render dataframe as readable plain-text table for Telegram.
+
+    We build explicit `|`-separated columns so the output is always visually
+    split into: source_id | address | chain | context_snippet.
+    """
 
     if df.empty:
         return "Адреса не найдены."
-    return df.to_string(index=False, max_colwidth=80)
+
+    expected_columns = ["source_id", "address", "chain", "context_snippet"]
+    view = df.loc[:, expected_columns].copy()
+
+    # Keep preview compact for Telegram while preserving all columns.
+    if len(view) > max_rows:
+        view = view.head(max_rows)
+
+    view["source_id"] = view["source_id"].astype(str).str.slice(0, 38)
+    view["address"] = view["address"].astype(str).str.slice(0, 44)
+    view["chain"] = view["chain"].astype(str).str.slice(0, 8)
+    view["context_snippet"] = view["context_snippet"].astype(str).str.slice(0, 60)
+
+    widths = {
+        "source_id": max(len("source_id"), view["source_id"].map(len).max()),
+        "address": max(len("address"), view["address"].map(len).max()),
+        "chain": max(len("chain"), view["chain"].map(len).max()),
+        "context_snippet": max(len("context_snippet"), view["context_snippet"].map(len).max()),
+    }
+
+    def format_row(row: dict[str, str]) -> str:
+        return (
+            f"{row['source_id']:<{widths['source_id']}} | "
+            f"{row['address']:<{widths['address']}} | "
+            f"{row['chain']:<{widths['chain']}} | "
+            f"{row['context_snippet']:<{widths['context_snippet']}}"
+        )
+
+    header = format_row({k: k for k in expected_columns})
+    sep = "-" * len(header)
+    rows = [
+        format_row(
+            {
+                "source_id": record["source_id"],
+                "address": record["address"],
+                "chain": record["chain"],
+                "context_snippet": record["context_snippet"],
+            }
+        )
+        for record in view.to_dict(orient="records")
+    ]
+
+
+    output = "\n".join([header, sep, *rows])
+    if len(df) > len(view):
+        output += f"\n... показаны первые {len(view)} из {len(df)} строк"
+
+    return output
 
 
 async def cmd_start(message: Message) -> None:
@@ -78,7 +129,7 @@ async def handle_url(message: Message) -> None:
     # Send preview in message.
     table_text = render_table(df)
     await status.edit_text(f"Найдено адресов: {len(df)}")
-    await message.answer(f"<pre>{html.escape(table_text[:3900])}</pre>", parse_mode="HTML")
+    await message.answer(f"<pre>{html.escape(table_text)}</pre>", parse_mode="HTML")
 
     # Send full table as CSV file.
     csv_bytes = df.to_csv(index=False).encode("utf-8")
