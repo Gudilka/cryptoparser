@@ -112,16 +112,8 @@ async def fetch_html(url: str, timeout_sec: int = 15) -> str:
         raise ParseError("Таймаут при загрузке страницы.") from exc
 
 
-async def parse_crypto_addresses(url: str) -> pd.DataFrame:
-    """Fetch page by URL and extract deduplicated crypto addresses.
-
-    Returns:
-        pandas.DataFrame with columns:
-        source_id, address, chain, context_snippet
-    """
-
-    html = await fetch_html(url)
-    text = _clean_text_from_html(html)
+def extract_crypto_addresses_from_text(text: str, source_id: str) -> pd.DataFrame:
+    """Extract deduplicated crypto addresses from plain text."""
 
     hits: list[AddressHit] = []
     seen: set[tuple[str, str]] = set()
@@ -137,7 +129,7 @@ async def parse_crypto_addresses(url: str) -> pd.DataFrame:
             seen.add(key)
             hits.append(
                 AddressHit(
-                    source_id=url,
+                    source_id=source_id,
                     address=address,
                     chain=chain,
                     context_snippet=_snippet(text, match.start(), match.end()),
@@ -151,3 +143,11 @@ async def parse_crypto_addresses(url: str) -> pd.DataFrame:
         df = df.sort_values(["chain", "address"]).reset_index(drop=True)
 
     return df
+
+
+async def parse_crypto_addresses(url: str) -> pd.DataFrame:
+    """Fetch page by URL and extract deduplicated crypto addresses."""
+
+    html = await fetch_html(url)
+    text = _clean_text_from_html(html)
+    return extract_crypto_addresses_from_text(text=text, source_id=url)
