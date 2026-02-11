@@ -25,6 +25,20 @@ pip install aiogram aiohttp beautifulsoup4 pandas
 export TELEGRAM_BOT_TOKEN="<your_token>"
 ```
 
+Альтернативно можно использовать переменную `BOT_TOKEN`.
+
+Для Windows:
+
+```bat
+set TELEGRAM_BOT_TOKEN=<your_token>
+```
+
+Для PowerShell:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN="<your_token>"
+```
+
 3. Запустите бота:
 
 ```bash
